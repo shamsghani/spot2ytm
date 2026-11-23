@@ -13,6 +13,11 @@ from playwright.async_api import async_playwright, BrowserContext, Page
 logger = logging.getLogger(__name__)
 
 PROFILE_DIR = Path(".profile")
+DEFAULT_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
 
 
 class YouTubeBrowserManager:
@@ -21,6 +26,9 @@ class YouTubeBrowserManager:
         self.profile_dir.mkdir(parents=True, exist_ok=True)
         self._playwright = None
         self._context: Optional[BrowserContext] = None
+        self._lock = asyncio.Lock()
+        self.is_logged_in: bool = False
+        self.is_logging_in: bool = False
 
     async def get_context(self, headless: bool = True) -> BrowserContext:
         if self._context is not None:
@@ -32,6 +40,8 @@ class YouTubeBrowserManager:
         self._context = await self._playwright.chromium.launch_persistent_context(
             user_data_dir=str(self.profile_dir.resolve()),
             headless=headless,
+            user_agent=DEFAULT_UA,
+            ignore_default_args=["--enable-automation"],
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
@@ -56,40 +66,71 @@ class YouTubeBrowserManager:
 
     async def check_login_status(self) -> bool:
         """Check if YouTube login cookies exist in the persistent profile."""
-        try:
-            ctx = await self.get_context(headless=True)
-            cookies = await ctx.cookies(["https://www.youtube.com"])
-            cookie_names = {c["name"] for c in cookies}
-            is_logged_in = bool(cookie_names.intersection({"SAPISID", "SSID", "LOGIN_INFO"}))
-            return is_logged_in
-        except Exception as e:
-            logger.error("Error checking login status: %s", e)
-            return False
-        finally:
-            await self.close()
+        if self.is_logging_in:
+            if self._context:
+                try:
+                    cookies = await self._context.cookies(["https://www.youtube.com"])
+                    cookie_names = {c["name"] for c in cookies}
+                    if "SAPISID" in cookie_names or "LOGIN_INFO" in cookie_names:
+                        self.is_logged_in = True
+                except Exception:
+                    pass
+            return self.is_logged_in
+
+        if self.is_logged_in:
+            return True
+
+        async with self._lock:
+            try:
+                ctx = await self.get_context(headless=True)
+                cookies = await ctx.cookies(["https://www.youtube.com"])
+                cookie_names = {c["name"] for c in cookies}
+                self.is_logged_in = bool(cookie_names.intersection({"SAPISID", "SSID", "LOGIN_INFO"}))
+                return self.is_logged_in
+            except Exception as e:
+                logger.error("Error checking login status: %s", e)
+                return False
 
     async def launch_login_flow(self, timeout_seconds: int = 180) -> bool:
         """
         Launches headful browser to Google / YouTube login page and waits for user to sign in.
         """
-        await self.close()  # Close existing headless context if any
-        ctx = await self.get_context(headless=False)
-        page = await ctx.new_page()
+        self.is_logging_in = True
+        try:
+            # Safely close existing headless context if running
+            await self.close()
 
-        await page.goto("https://accounts.google.com/ServiceLogin?service=youtube&continue=https://www.youtube.com")
+            # Launch visible headful browser
+            ctx = await self.get_context(headless=False)
+            page = await ctx.new_page()
 
-        start_time = asyncio.get_event_loop().time()
-        while (asyncio.get_event_loop().time() - start_time) < timeout_seconds:
-            await asyncio.sleep(2)
-            cookies = await ctx.cookies(["https://www.youtube.com"])
-            cookie_names = {c["name"] for c in cookies}
-            if "SAPISID" in cookie_names or "LOGIN_INFO" in cookie_names:
-                logger.info("Successfully detected YouTube login session!")
-                await page.close()
-                return True
+            logger.info("Opening login window to YouTube sign-in...")
+            await page.goto(
+                "https://accounts.google.com/ServiceLogin?service=youtube&continue=https://www.youtube.com",
+                wait_until="commit",
+            )
 
-        await page.close()
-        return False
+            start_time = asyncio.get_event_loop().time()
+            while (asyncio.get_event_loop().time() - start_time) < timeout_seconds:
+                await asyncio.sleep(2)
+                try:
+                    cookies = await ctx.cookies(["https://www.youtube.com"])
+                    cookie_names = {c["name"] for c in cookies}
+                    if "SAPISID" in cookie_names or "LOGIN_INFO" in cookie_names:
+                        logger.info("Successfully detected YouTube login session!")
+                        self.is_logged_in = True
+                        await asyncio.sleep(1)
+                        await page.close()
+                        await self.close()
+                        return True
+                except Exception:
+                    # Context might have been closed by user manually
+                    break
+
+            return self.is_logged_in
+        finally:
+            self.is_logging_in = False
+            await self.close()
 
     async def sync_playlist(
         self,
@@ -100,51 +141,56 @@ class YouTubeBrowserManager:
         """
         Creates (or opens) the target playlist on YouTube and adds video IDs.
         """
-        ctx = await self.get_context(headless=True)
-        page = await ctx.new_page()
+        async with self._lock:
+            await self.close()  # Ensure clean context
+            ctx = await self.get_context(headless=True)
+            page = await ctx.new_page()
 
-        try:
-            # 1. Open YouTube to load ytcfg and user session context
-            await page.goto("https://www.youtube.com", wait_until="networkidle")
+            try:
+                # 1. Open YouTube to load ytcfg and user session context
+                await page.goto("https://www.youtube.com", wait_until="networkidle")
 
-            # 2. Get or create playlist
-            playlist_id = await self._get_or_create_playlist(page, playlist_name)
-            if not playlist_id:
-                raise RuntimeError("Failed to obtain or create YouTube playlist.")
+                # 2. Get or create playlist
+                playlist_id = await self._get_or_create_playlist(page, playlist_name)
+                if not playlist_id:
+                    raise RuntimeError("Failed to obtain or create YouTube playlist.")
 
-            # 3. Add tracks in batches using YouTube's internal editPlaylist endpoint
-            total = len(video_ids)
-            added_count = 0
+                # 3. Add tracks in batches
+                total = len(video_ids)
+                added_count = 0
+                batch_size = 20
 
-            # Process in batches of 20 to avoid payload limits
-            batch_size = 20
-            for i in range(0, total, batch_size):
-                batch = video_ids[i : i + batch_size]
-                success = await self._add_videos_batch(page, playlist_id, batch)
+                for i in range(0, total, batch_size):
+                    batch = video_ids[i : i + batch_size]
+                    success = await self._add_videos_batch(page, playlist_id, batch)
 
-                if success:
-                    added_count += len(batch)
-                else:
-                    # Fallback: add one by one
-                    for vid in batch:
-                        single_ok = await self._add_videos_batch(page, playlist_id, [vid])
-                        if single_ok:
-                            added_count += 1
-                        await asyncio.sleep(0.5)
+                    if success:
+                        added_count += len(batch)
+                    else:
+                        for vid in batch:
+                            single_ok = await self._add_videos_batch(page, playlist_id, [vid])
+                            if single_ok:
+                                added_count += 1
+                            await asyncio.sleep(0.5)
 
-                if progress_callback:
-                    progress_callback(min(i + len(batch), total), total, f"Synced {min(i + len(batch), total)}/{total} tracks")
-                await asyncio.sleep(1.0)
+                    if progress_callback:
+                        progress_callback(
+                            min(i + len(batch), total),
+                            total,
+                            f"Synced {min(i + len(batch), total)}/{total} tracks",
+                        )
+                    await asyncio.sleep(0.5)
 
-            return {
-                "success": True,
-                "playlist_id": playlist_id,
-                "playlist_url": f"https://www.youtube.com/playlist?list={playlist_id}",
-                "total": total,
-                "added": added_count,
-            }
-        finally:
-            await page.close()
+                return {
+                    "success": True,
+                    "playlist_id": playlist_id,
+                    "playlist_url": f"https://www.youtube.com/playlist?list={playlist_id}",
+                    "total": total,
+                    "added": added_count,
+                }
+            finally:
+                await page.close()
+                await self.close()
 
     async def _get_or_create_playlist(self, page: Page, name: str) -> Optional[str]:
         """Call YouTube internal API from page context to create or find a playlist."""
@@ -155,7 +201,6 @@ class YouTubeBrowserManager:
                 const context = window.ytcfg ? window.ytcfg.get('INNERTUBE_CONTEXT') : null;
                 if (!apiKey || !context) return { error: 'Missing ytcfg context' };
 
-                // Create new playlist
                 const resp = await fetch('/youtubei/v1/playlist/create?key=' + apiKey, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
