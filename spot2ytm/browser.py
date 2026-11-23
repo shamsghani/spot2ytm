@@ -6,6 +6,10 @@ avoiding YouTube Data API quotas.
 
 import asyncio
 import logging
+import os
+import shutil
+import sqlite3
+import tempfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from playwright.async_api import async_playwright, BrowserContext, Page
@@ -27,12 +31,29 @@ class YouTubeBrowserManager:
         self._playwright = None
         self._context: Optional[BrowserContext] = None
         self._lock = asyncio.Lock()
-        self.is_logged_in: bool = False
         self.is_logging_in: bool = False
+
+    def clean_stale_locks(self):
+        """Remove stale Chromium SingletonLock files if no context is open."""
+        if self._context is not None:
+            return
+        lock_files = [
+            self.profile_dir / "SingletonLock",
+            self.profile_dir / "SingletonCookie",
+            self.profile_dir / "SingletonSocket",
+        ]
+        for f in lock_files:
+            try:
+                if f.exists():
+                    f.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     async def get_context(self, headless: bool = True) -> BrowserContext:
         if self._context is not None:
             return self._context
+
+        self.clean_stale_locks()
 
         if self._playwright is None:
             self._playwright = await async_playwright().start()
@@ -63,74 +84,100 @@ class YouTubeBrowserManager:
             except Exception:
                 pass
             self._playwright = None
+        self.clean_stale_locks()
 
     async def check_login_status(self) -> bool:
-        """Check if YouTube login cookies exist in the persistent profile."""
-        if self.is_logging_in:
-            if self._context:
+        """
+        Fast, non-blocking login check.
+        Inspects the local SQLite cookie store or active browser context
+        without launching any background browser process.
+        """
+        # If headful browser is currently open for login, inspect it live
+        if self._context is not None:
+            try:
+                cookies = await self._context.cookies(["https://www.youtube.com"])
+                names = {c["name"] for c in cookies}
+                return bool(names.intersection({"SAPISID", "SSID", "LOGIN_INFO"}))
+            except Exception:
+                pass
+
+        # Otherwise read from SQLite cookie file directly (0ms, zero locks)
+        return self._check_cookies_on_disk()
+
+    def _check_cookies_on_disk(self) -> bool:
+        cookie_db_paths = [
+            self.profile_dir / "Default" / "Network" / "Cookies",
+            self.profile_dir / "Default" / "Cookies",
+        ]
+        db_path = next((p for p in cookie_db_paths if p.exists()), None)
+        if not db_path:
+            return False
+
+        temp_db = None
+        try:
+            # Copy to temp file so we don't hold any lock on Chromium's file
+            fd, temp_db = tempfile.mkstemp(suffix=".sqlite")
+            os.close(fd)
+            shutil.copy2(db_path, temp_db)
+
+            with sqlite3.connect(temp_db) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT name FROM cookies WHERE host_key LIKE ? AND name IN ('SAPISID', 'SSID', 'LOGIN_INFO')",
+                    ("%youtube.com%",),
+                )
+                rows = cursor.fetchall()
+                return len(rows) > 0
+        except Exception as e:
+            logger.debug("Error checking cookie db on disk: %s", e)
+            return False
+        finally:
+            if temp_db and os.path.exists(temp_db):
                 try:
-                    cookies = await self._context.cookies(["https://www.youtube.com"])
-                    cookie_names = {c["name"] for c in cookies}
-                    if "SAPISID" in cookie_names or "LOGIN_INFO" in cookie_names:
-                        self.is_logged_in = True
+                    os.unlink(temp_db)
                 except Exception:
                     pass
-            return self.is_logged_in
-
-        if self.is_logged_in:
-            return True
-
-        async with self._lock:
-            try:
-                ctx = await self.get_context(headless=True)
-                cookies = await ctx.cookies(["https://www.youtube.com"])
-                cookie_names = {c["name"] for c in cookies}
-                self.is_logged_in = bool(cookie_names.intersection({"SAPISID", "SSID", "LOGIN_INFO"}))
-                return self.is_logged_in
-            except Exception as e:
-                logger.error("Error checking login status: %s", e)
-                return False
 
     async def launch_login_flow(self, timeout_seconds: int = 180) -> bool:
         """
         Launches headful browser to Google / YouTube login page and waits for user to sign in.
         """
-        self.is_logging_in = True
-        try:
-            # Safely close existing headless context if running
-            await self.close()
+        async with self._lock:
+            self.is_logging_in = True
+            try:
+                # Ensure clean slate
+                await self.close()
 
-            # Launch visible headful browser
-            ctx = await self.get_context(headless=False)
-            page = await ctx.new_page()
+                # Launch visible headful browser
+                ctx = await self.get_context(headless=False)
+                page = await ctx.new_page()
 
-            logger.info("Opening login window to YouTube sign-in...")
-            await page.goto(
-                "https://accounts.google.com/ServiceLogin?service=youtube&continue=https://www.youtube.com",
-                wait_until="commit",
-            )
+                logger.info("Opening login window to YouTube sign-in...")
+                await page.goto(
+                    "https://accounts.google.com/ServiceLogin?service=youtube&continue=https://www.youtube.com",
+                    wait_until="commit",
+                )
 
-            start_time = asyncio.get_event_loop().time()
-            while (asyncio.get_event_loop().time() - start_time) < timeout_seconds:
-                await asyncio.sleep(2)
-                try:
-                    cookies = await ctx.cookies(["https://www.youtube.com"])
-                    cookie_names = {c["name"] for c in cookies}
-                    if "SAPISID" in cookie_names or "LOGIN_INFO" in cookie_names:
-                        logger.info("Successfully detected YouTube login session!")
-                        self.is_logged_in = True
-                        await asyncio.sleep(1)
-                        await page.close()
-                        await self.close()
-                        return True
-                except Exception:
-                    # Context might have been closed by user manually
-                    break
+                start_time = asyncio.get_event_loop().time()
+                while (asyncio.get_event_loop().time() - start_time) < timeout_seconds:
+                    await asyncio.sleep(2)
+                    try:
+                        cookies = await ctx.cookies(["https://www.youtube.com"])
+                        cookie_names = {c["name"] for c in cookies}
+                        if "SAPISID" in cookie_names or "LOGIN_INFO" in cookie_names:
+                            logger.info("Successfully detected YouTube login session!")
+                            await asyncio.sleep(1)
+                            await page.close()
+                            await self.close()
+                            return True
+                    except Exception:
+                        # Window might have been closed by user
+                        break
 
-            return self.is_logged_in
-        finally:
-            self.is_logging_in = False
-            await self.close()
+                return False
+            finally:
+                self.is_logging_in = False
+                await self.close()
 
     async def sync_playlist(
         self,
@@ -142,20 +189,17 @@ class YouTubeBrowserManager:
         Creates (or opens) the target playlist on YouTube and adds video IDs.
         """
         async with self._lock:
-            await self.close()  # Ensure clean context
+            await self.close()
             ctx = await self.get_context(headless=True)
             page = await ctx.new_page()
 
             try:
-                # 1. Open YouTube to load ytcfg and user session context
                 await page.goto("https://www.youtube.com", wait_until="networkidle")
 
-                # 2. Get or create playlist
                 playlist_id = await self._get_or_create_playlist(page, playlist_name)
                 if not playlist_id:
                     raise RuntimeError("Failed to obtain or create YouTube playlist.")
 
-                # 3. Add tracks in batches
                 total = len(video_ids)
                 added_count = 0
                 batch_size = 20
@@ -193,7 +237,6 @@ class YouTubeBrowserManager:
                 await self.close()
 
     async def _get_or_create_playlist(self, page: Page, name: str) -> Optional[str]:
-        """Call YouTube internal API from page context to create or find a playlist."""
         script = """
         async (playlistTitle) => {
             try {
@@ -224,7 +267,6 @@ class YouTubeBrowserManager:
         return None
 
     async def _add_videos_batch(self, page: Page, playlist_id: str, video_ids: List[str]) -> bool:
-        """Call edit_playlist to append videos to playlist in one network request."""
         script = """
         async (args) => {
             const { playlistId, videoIds } = args;
