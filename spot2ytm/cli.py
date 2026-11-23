@@ -114,12 +114,25 @@ def cli_sync(url: str, playlist_name: str = None):
     asyncio.run(run_sync())
 
 
+def cli_login():
+    console.print("[bold cyan]Opening Google sign-in window...[/bold cyan]")
+    browser = YouTubeBrowserManager()
+    ok = asyncio.run(browser.launch_login_flow(180))
+    if ok:
+        console.print("[bold green]✔ YouTube login successfully saved to .profile![/bold green]")
+    else:
+        console.print("[bold red]Login timed out or window was closed.[/bold red]")
+
+
 def main():
     parser = argparse.ArgumentParser(description="spot2ytm: Spotify to YouTube Music Migrator")
     subparsers = parser.add_subparsers(dest="command")
 
     # web command
     subparsers.add_parser("web", help="Launch the local web dashboard")
+
+    # login command
+    subparsers.add_parser("login", help="Open Google sign-in window to authenticate")
 
     # match command
     match_parser = subparsers.add_parser("match", help="Match tracks without modifying YouTube")
@@ -135,6 +148,8 @@ def main():
     if args.command == "web" or len(sys.argv) == 1:
         import run
         run.main()
+    elif args.command == "login":
+        cli_login()
     elif args.command == "match":
         cli_match(args.url)
     elif args.command == "sync":

@@ -13,7 +13,10 @@
 - **🎯 Precision Matching Engine**:
   - **ISRC First**: Queries YouTube Music by International Standard Recording Code for 100% verified track matches.
   - **Fuzzy + Duration Scoring**: Uses RapidFuzz token matching, strict duration tolerance (±4s), and negative keyword filtering (filters out live, slowed, reverb, acoustic, or fan covers unless requested).
-- **⚡ Quota-Free YouTube Sync**: Standard YouTube Data API v3 enforces a 10,000 unit/day quota (adding 1 song costs 50 units = max 200 songs/day). `spot2ytm` uses a persistent Playwright session (`./.profile`) to sync playlists directly without API limits.
+- **⚡ Direct In-Browser Sync**:
+  - **Option A (Bookmarklet / 1-Click)**: Syncs directly inside your already-open YouTube Music tab. No separate windows, no passwords, no 2FA prompts.
+  - **Option B (Chrome Extension)**: Comes with a built-in Chrome Extension in `extension/` for 1-click toolbar migration.
+  - **Option C (Desktop Service)**: Optional Playwright automation for background batch syncing.
 - **💾 Local Match Cache**: Matched tracks are cached in `.cache/matches.json` so re-syncing or updating large playlists is instantaneous.
 
 ---

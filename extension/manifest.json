@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "spot2ytm - Spotify to YouTube Music Migrator",
+  "version": "1.0.0",
+  "description": "Seamlessly migrate Spotify playlists into your active YouTube / YouTube Music account in 1 click.",
+  "permissions": ["activeTab", "cookies"],
+  "host_permissions": [
+    "*://*.youtube.com/*",
+    "*://open.spotify.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "spot2ytm Migrator"
+  }
+}
