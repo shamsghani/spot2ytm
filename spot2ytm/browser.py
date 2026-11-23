@@ -12,7 +12,14 @@ import sqlite3
 import tempfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-from playwright.async_api import async_playwright, BrowserContext, Page
+
+try:
+    from playwright.async_api import async_playwright, BrowserContext, Page
+    HAS_PLAYWRIGHT = True
+except ImportError:
+    HAS_PLAYWRIGHT = False
+    BrowserContext = Any
+    Page = Any
 
 logger = logging.getLogger(__name__)
 

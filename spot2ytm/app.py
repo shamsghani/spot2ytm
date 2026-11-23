@@ -1,7 +1,7 @@
 """
 FastAPI Backend for spot2ytm.
 Serves the web dashboard, manages Spotify extraction, YouTube matching,
-and handles streaming progress for playlist sync.
+and handles real-time streaming progress logs.
 """
 
 import asyncio
@@ -9,14 +9,12 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from spot2ytm.spotify import SpotifyExtractor
 from spot2ytm.matcher import MusicMatcher
-from spot2ytm.browser import YouTubeBrowserManager
 from spot2ytm.cache import MatchCache
 
 logger = logging.getLogger("spot2ytm")
@@ -27,19 +25,8 @@ app = FastAPI(title="spot2ytm")
 extractor = SpotifyExtractor()
 cache = MatchCache()
 matcher = MusicMatcher(cache=cache)
-browser_manager = YouTubeBrowserManager()
 
 WEB_DIR = Path(__file__).parent / "web"
-
-# In-memory sync state and progress event stream
-sync_state = {
-    "is_syncing": False,
-    "percent": 0,
-    "message": "Idle",
-    "done": False,
-    "playlist_url": "",
-    "error": None,
-}
 
 
 class FetchRequest(BaseModel):
@@ -48,11 +35,6 @@ class FetchRequest(BaseModel):
 
 class BulkFetchRequest(BaseModel):
     urls: List[str]
-
-
-class SyncRequest(BaseModel):
-    playlist_name: str
-    video_ids: List[str]
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -66,30 +48,134 @@ async def get_index():
 
 @app.get("/api/status")
 async def get_status():
-    logged_in = await browser_manager.check_login_status()
     return {
-        "logged_in": logged_in,
+        "status": "ready",
         "cache_count": len(cache.data),
-        "sync_state": sync_state,
     }
 
 
-@app.post("/api/login")
-async def trigger_login(background_tasks: BackgroundTasks):
-    background_tasks.add_task(browser_manager.launch_login_flow, 180)
-    return {"status": "login_flow_started"}
+@app.post("/api/fetch/stream")
+async def fetch_and_match_stream(req: FetchRequest):
+    """Server-Sent Events endpoint streaming verbose real-time progress for single playlist."""
+    async def event_generator():
+        try:
+            yield f"data: {json.dumps({'type': 'log', 'level': 'info', 'message': 'Connecting to Spotify to extract playlist metadata...'})}\n\n"
+            playlist = await asyncio.to_thread(extractor.get_playlist, req.url)
+            total = len(playlist.tracks)
+            yield f"data: {json.dumps({'type': 'log', 'level': 'info', 'message': f'Extracted: \"{playlist.name}\" by {playlist.author} ({total} tracks)'})}\n\n"
+            yield f"data: {json.dumps({'type': 'playlist_info', 'playlist': playlist.to_dict()})}\n\n"
+
+            matches = []
+            for i, track in enumerate(playlist.tracks):
+                pct = int(((i) / max(1, total)) * 100)
+                yield f"data: {json.dumps({'type': 'progress', 'current': i + 1, 'total': total, 'percent': pct, 'track_name': track.name, 'artist': track.primary_artist})}\n\n"
+
+                m = await asyncio.to_thread(matcher.match_track, track)
+                matches.append(m.to_dict())
+
+                if m.match_type == "isrc":
+                    level = "success"
+                    msg = f"[{i+1}/{total}] ✓ ISRC Match: {track.artist_str} - {track.name} ➔ {m.youtube_title} ({m.confidence:.0f}%)"
+                elif m.confidence >= 80:
+                    level = "success"
+                    msg = f"[{i+1}/{total}] ⚡ High Match: {track.artist_str} - {track.name} ➔ {m.youtube_title} ({m.confidence:.0f}%)"
+                elif m.youtube_video_id:
+                    level = "warning"
+                    msg = f"[{i+1}/{total}] ~ Fuzzy Match: {track.artist_str} - {track.name} ➔ {m.youtube_title} ({m.confidence:.0f}%)"
+                else:
+                    level = "error"
+                    msg = f"[{i+1}/{total}] ✗ Unmatched: {track.artist_str} - {track.name}"
+
+                yield f"data: {json.dumps({'type': 'log', 'level': level, 'message': msg})}\n\n"
+                yield f"data: {json.dumps({'type': 'track_match', 'index': i, 'match': m.to_dict()})}\n\n"
+
+            matched_count = sum(1 for m in matches if m.get("youtube_video_id"))
+            yield f"data: {json.dumps({'type': 'progress', 'current': total, 'total': total, 'percent': 100, 'track_name': 'Done', 'artist': ''})}\n\n"
+            yield f"data: {json.dumps({'type': 'log', 'level': 'success', 'message': f'🎉 Matching finished! {matched_count}/{total} songs matched ({matched_count/max(1,total)*100:.0f}%).' })}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'playlist': playlist.to_dict(), 'matches': matches})}\n\n"
+
+        except Exception as e:
+            logger.exception("Error during fetch stream")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
+@app.post("/api/fetch-bulk/stream")
+async def fetch_and_match_bulk_stream(req: BulkFetchRequest):
+    """Server-Sent Events endpoint streaming verbose real-time progress for bulk playlists."""
+    async def event_generator():
+        try:
+            urls = [u.strip() for u in req.urls if u.strip()]
+            total_playlists = len(urls)
+            yield f"data: {json.dumps({'type': 'log', 'level': 'info', 'message': f'Starting bulk processing of {total_playlists} playlists...'})}\n\n"
+
+            all_results = []
+            total_tracks_all = 0
+            total_matched_all = 0
+
+            for p_idx, url in enumerate(urls):
+                yield f"data: {json.dumps({'type': 'log', 'level': 'info', 'message': f'📂 [{p_idx+1}/{total_playlists}] Fetching metadata for {url}'})}\n\n"
+                try:
+                    playlist = await asyncio.to_thread(extractor.get_playlist, url)
+                except Exception as pe:
+                    yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'Failed to extract playlist {url}: {pe}'})}\n\n"
+                    continue
+
+                total_tracks = len(playlist.tracks)
+                total_tracks_all += total_tracks
+                yield f"data: {json.dumps({'type': 'log', 'level': 'info', 'message': f'📋 [{p_idx+1}/{total_playlists}] \"{playlist.name}\" loaded ({total_tracks} tracks)'})}\n\n"
+
+                matches = []
+                for i, track in enumerate(playlist.tracks):
+                    pct = int(((i) / max(1, total_tracks)) * 100)
+                    yield f"data: {json.dumps({'type': 'progress', 'current': i + 1, 'total': total_tracks, 'percent': pct, 'playlist_index': p_idx + 1, 'total_playlists': total_playlists, 'playlist_name': playlist.name, 'track_name': track.name, 'artist': track.primary_artist})}\n\n"
+
+                    m = await asyncio.to_thread(matcher.match_track, track)
+                    matches.append(m.to_dict())
+
+                    if m.match_type == "isrc":
+                        level = "success"
+                        msg = f"  [{i+1}/{total_tracks}] ✓ ISRC: {track.artist_str} - {track.name} ➔ {m.youtube_title}"
+                    elif m.confidence >= 80:
+                        level = "success"
+                        msg = f"  [{i+1}/{total_tracks}] ⚡ High: {track.artist_str} - {track.name} ➔ {m.youtube_title} ({m.confidence:.0f}%)"
+                    elif m.youtube_video_id:
+                        level = "warning"
+                        msg = f"  [{i+1}/{total_tracks}] ~ Fuzzy: {track.artist_str} - {track.name} ➔ {m.youtube_title} ({m.confidence:.0f}%)"
+                    else:
+                        level = "error"
+                        msg = f"  [{i+1}/{total_tracks}] ✗ Unmatched: {track.artist_str} - {track.name}"
+
+                    yield f"data: {json.dumps({'type': 'log', 'level': level, 'message': msg})}\n\n"
+
+                p_matched = sum(1 for m in matches if m.get("youtube_video_id"))
+                total_matched_all += p_matched
+                yield f"data: {json.dumps({'type': 'log', 'level': 'success', 'message': f'✓ Completed \"{playlist.name}\": {p_matched}/{total_tracks} matched.'})}\n\n"
+
+                p_item = {"playlist": playlist.to_dict(), "matches": matches}
+                all_results.append(p_item)
+                yield f"data: {json.dumps({'type': 'playlist_done', 'index': p_idx, 'item': p_item})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'log', 'level': 'success', 'message': f'🎉 Bulk processing complete! {total_matched_all}/{total_tracks_all} tracks matched across {len(all_results)} playlists.'})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'items': all_results})}\n\n"
+
+        except Exception as e:
+            logger.exception("Error in bulk stream")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+# Fallback non-streaming endpoints
 @app.post("/api/fetch")
 async def fetch_and_match(req: FetchRequest):
     try:
-        # Run blocking network requests in threadpool
         playlist = await asyncio.to_thread(extractor.get_playlist, req.url)
         matches = []
         for track in playlist.tracks:
             m = await asyncio.to_thread(matcher.match_track, track)
             matches.append(m.to_dict())
-
         return {
             "playlist": playlist.to_dict(),
             "matches": matches,
@@ -123,66 +209,3 @@ async def fetch_and_match_bulk(req: BulkFetchRequest):
     except Exception as e:
         logger.exception("Failed bulk fetch")
         return {"error": str(e)}
-
-
-async def _perform_sync(playlist_name: str, video_ids: List[str]):
-    sync_state["is_syncing"] = True
-    sync_state["percent"] = 5
-    sync_state["message"] = f"Initializing sync for {len(video_ids)} tracks..."
-    sync_state["done"] = False
-    sync_state["error"] = None
-
-    def on_progress(current: int, total: int, msg: str):
-        pct = int((current / max(1, total)) * 95)
-        sync_state["percent"] = pct
-        sync_state["message"] = msg
-
-    try:
-        result = await browser_manager.sync_playlist(
-            playlist_name=playlist_name,
-            video_ids=video_ids,
-            progress_callback=on_progress,
-        )
-        sync_state["percent"] = 100
-        sync_state["message"] = f"Successfully added {result.get('added', 0)} tracks to playlist!"
-        sync_state["playlist_url"] = result.get("playlist_url", "")
-        sync_state["done"] = True
-    except Exception as e:
-        logger.exception("Sync failed")
-        sync_state["error"] = str(e)
-        sync_state["message"] = f"Error: {e}"
-        sync_state["done"] = True
-    finally:
-        sync_state["is_syncing"] = False
-
-
-@app.post("/api/sync")
-async def start_sync(req: SyncRequest, background_tasks: BackgroundTasks):
-    if sync_state["is_syncing"]:
-        return {"status": "already_syncing"}
-    background_tasks.add_task(_perform_sync, req.playlist_name, req.video_ids)
-    return {"status": "started"}
-
-
-@app.get("/api/sync/stream")
-async def sync_stream(request: Request):
-    """Server-Sent Events endpoint streaming progress to the web UI."""
-    async def event_generator():
-        while True:
-            if await request.is_disconnected():
-                break
-
-            data = json.dumps({
-                "percent": sync_state["percent"],
-                "message": sync_state["message"],
-                "done": sync_state["done"],
-                "playlist_url": sync_state["playlist_url"],
-                "error": sync_state["error"],
-            })
-            yield f"data: {data}\n\n"
-
-            if sync_state["done"]:
-                break
-            await asyncio.sleep(0.5)
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")

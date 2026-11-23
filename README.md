@@ -1,41 +1,48 @@
 # spot2ytm 🎵➔📺
 
-> Migrate Spotify playlists over to YouTube & YouTube Music with zero API keys, smart ISRC matching, and no daily quota limits.
+> Seamlessly migrate Spotify playlists over to YouTube & YouTube Music with zero API keys, smart ISRC matching, live verbose activity logging, and no daily quota limits.
 
-`spot2ytm` is a local desktop web application that extracts Spotify playlist metadata, matches the songs against YouTube Music using spotDL-style matching algorithms, and syncs them directly to your YouTube library using an authenticated browser session.
+`spot2ytm` is a lightweight, portable desktop web application that extracts Spotify playlist metadata, matches songs against YouTube Music using spotDL-style matching algorithms, and syncs them directly to your YouTube library using your active browser session.
 
 ---
 
 ## ✨ Features
 
-- **🚀 Auto-Launching Web Dashboard**: Just run `python run.py` — it boots a local server and automatically pops open the clean, dark-mode web UI in your default browser.
-- **🔑 Zero Spotify API Setup**: Built with `SpotipyFree`. Paste any public Spotify playlist URL and it extracts all tracks immediately without needing a Spotify Developer account or client secrets.
+- **⚡ Click-and-Run Portability**: Just double-click `run.bat` on Windows (or run `./run.sh` on Mac/Linux). It automatically sets up dependencies, boots the local server, and launches the web UI in your browser.
+- **🔑 Zero API Keys Required**: Built with `SpotipyFree`. Paste any Spotify playlist link and it extracts track details immediately without Spotify Developer credentials.
 - **🎯 Precision Matching Engine**:
   - **ISRC First**: Queries YouTube Music by International Standard Recording Code for 100% verified track matches.
-  - **Fuzzy + Duration Scoring**: Uses RapidFuzz token matching, strict duration tolerance (±4s), and negative keyword filtering (filters out live, slowed, reverb, acoustic, or fan covers unless requested).
-- **⚡ Direct In-Browser Sync**:
-  - **Option A (Bookmarklet / 1-Click)**: Syncs directly inside your already-open YouTube Music tab. No separate windows, no passwords, no 2FA prompts.
-  - **Option B (Chrome Extension)**: Comes with a built-in Chrome Extension in `extension/` for 1-click toolbar migration.
-  - **Option C (Desktop Service)**: Optional Playwright automation for background batch syncing.
+  - **Fuzzy + Duration Scoring**: Uses RapidFuzz token matching, strict duration tolerance (±4s), and negative keyword filtering (filters out fan covers, slowed/reverb, karaoke, or acoustic versions).
+- **📋 Live Verbose Progress Console**: Real-time Server-Sent Events stream showing exact progress per track, ISRC detection, candidate scoring, and matching status directly in an embedded terminal log.
+- **📚 Single & Bulk Playlist Support**: Migrate an individual playlist or batch-process multiple playlists at once.
+- **🚀 100% In-Browser 1-Click Sync**:
+  - **Option A (Drag Bookmarklet)**: Drag the bookmarklet to your bookmarks bar. Open YouTube Music and click it. No Google logins or secondary browser profiles needed!
+  - **Option B (Included Chrome Extension)**: Load the included `extension/` folder in `chrome://extensions` for a permanent toolbar sync button.
+  - **Option C (F12 Console Snippet)**: Quick copy-paste snippet for developer console sync.
 - **💾 Local Match Cache**: Matched tracks are cached in `.cache/matches.json` so re-syncing or updating large playlists is instantaneous.
 
 ---
 
 ## 🛠️ Quick Start
 
-### 1. Clone & Install Dependencies
+### Windows (1-Click Run)
+Simply double-click:
+```
+run.bat
+```
+*(On first run, it will automatically create a lightweight `.venv` and install the minimal dependencies).*
 
+### macOS / Linux
 ```bash
 git clone https://github.com/shamsghani/spot2ytm.git
 cd spot2ytm
-
-pip install -r requirements.txt
-python -m playwright install chromium
+chmod +x run.sh
+./run.sh
 ```
 
-### 2. Launch the Application
-
+### Manual Run
 ```bash
+pip install -r requirements.txt
 python run.py
 ```
 
@@ -45,22 +52,22 @@ Your browser will automatically open to `http://localhost:5000`.
 
 ## 📖 How to Use
 
-1. **Connect YouTube (One-Time)**:
-   - On the top right of the dashboard, if it says **"Not Logged In"**, click **"Log in to YouTube"**.
-   - A browser window will open to Google's sign-in page. Log into your Google account.
-   - Your session is saved locally in `.profile/` so you only ever have to do this once.
-2. **Load Spotify Playlist**:
-   - Paste any public Spotify playlist URL (e.g., `https://open.spotify.com/playlist/...`).
+1. **Paste Spotify Playlist(s)**:
+   - For a single playlist: Paste the link into the **Single Playlist** tab.
+   - For multiple playlists: Switch to the **Bulk / All Playlists** tab and paste links (one per line).
+2. **Watch Live Matching**:
    - Click **"Load & Match"**.
+   - Watch the **Live Matching Progress** terminal stream every track lookup, ISRC match, and confidence score in real time.
 3. **Review Matches**:
-   - Inspect the tracks table with confidence scores, matched YouTube video titles, and duration comparisons.
-4. **Sync to YouTube**:
-   - Customize the target playlist name if desired.
-   - Click **"Sync to YouTube"** and watch the real-time progress bar as tracks are added to your YouTube / YouTube Music library.
+   - Check the preview table with matched YouTube Music audio titles, durations, and match tags.
+4. **1-Click Sync to YouTube**:
+   - Click **"1-Click Sync to YouTube"**.
+   - Choose your preferred sync method (drag bookmarklet, extension, or console snippet).
+   - Watch all tracks get added to your YouTube / YouTube Music library instantly!
 
 ---
 
-## 🏗️ Architecture
+## 📦 Lightweight Architecture
 
 ```
 [ Spotify URL ] ──▶ [ Spotify Extractor (SpotipyFree) ]
@@ -69,14 +76,12 @@ Your browser will automatically open to `http://localhost:5000`.
                     [ YouTube Music Matcher ]
                      ├─ 1. ISRC exact query
                      ├─ 2. "Artist - Title" search
-                     └─ 3. Fuzzy & duration penalty filter
+                     ├─ 3. Fuzzy & duration penalty filter
                             │
-                            ▼ (Matched YouTube Video IDs)
-                    [ Playwright Browser Manager ]
-                     ├─ Persistent Google profile (.profile/)
-                     └─ YouTube internal editPlaylist batch call
+                            ▼ (Real-time SSE event stream)
+                    [ Web Dashboard & Terminal Log ]
                             │
-                            ▼
+                            ▼ (InnerTube Batch Sync)
                     [ Target YouTube Playlist Created & Populated ]
 ```
 
@@ -84,4 +89,4 @@ Your browser will automatically open to `http://localhost:5000`.
 
 ## 📜 License
 
-MIT License. Created for personal playlist migration.
+MIT License. Created for personal Spotify to YouTube Music playlist migration.
