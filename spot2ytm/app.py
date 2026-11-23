@@ -46,6 +46,10 @@ class FetchRequest(BaseModel):
     url: str
 
 
+class BulkFetchRequest(BaseModel):
+    urls: List[str]
+
+
 class SyncRequest(BaseModel):
     playlist_name: str
     video_ids: List[str]
@@ -92,6 +96,32 @@ async def fetch_and_match(req: FetchRequest):
         }
     except Exception as e:
         logger.exception("Failed to fetch playlist")
+        return {"error": str(e)}
+
+
+@app.post("/api/fetch-bulk")
+async def fetch_and_match_bulk(req: BulkFetchRequest):
+    try:
+        results = []
+        for url in req.urls:
+            url = url.strip()
+            if not url:
+                continue
+            try:
+                playlist = await asyncio.to_thread(extractor.get_playlist, url)
+                matches = []
+                for track in playlist.tracks:
+                    m = await asyncio.to_thread(matcher.match_track, track)
+                    matches.append(m.to_dict())
+                results.append({
+                    "playlist": playlist.to_dict(),
+                    "matches": matches,
+                })
+            except Exception as e:
+                logger.warning("Error fetching playlist %s: %s", url, e)
+        return {"items": results}
+    except Exception as e:
+        logger.exception("Failed bulk fetch")
         return {"error": str(e)}
 
 

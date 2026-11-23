@@ -69,6 +69,31 @@ def extract_playlist_id(url_or_id: str) -> str:
     raise ValueError(f"Invalid Spotify playlist URL or ID: {url_or_id}")
 
 
+def parse_playlist_inputs(raw_text: str) -> List[str]:
+    """Parse text that may contain multiple Spotify URLs (one per line, comma, etc.)."""
+    matches = re.findall(r"https?://open\.spotify\.com/(?:intl-\w+/)?playlist/[a-zA-Z0-9]+", raw_text)
+    if matches:
+        return list(dict.fromkeys(matches))
+
+    urls = []
+    for line in re.split(r"[\n,\r]+", raw_text):
+        line = line.strip()
+        if line:
+            urls.append(line)
+    return urls
+
+
+def is_user_profile_url(url: str) -> bool:
+    """Check if URL is a Spotify user profile."""
+    return bool(re.search(r"open\.spotify\.com/(?:intl-\w+/)?user/[a-zA-Z0-9_\.]+", url.strip()))
+
+
+def extract_user_id(url: str) -> Optional[str]:
+    """Extract user ID from a Spotify profile URL."""
+    m = re.search(r"user[/:]([a-zA-Z0-9_\.]+)", url.strip())
+    return m.group(1) if m else None
+
+
 class SpotifyExtractor:
     def __init__(self):
         self.client = FreeSpotify()
@@ -145,3 +170,17 @@ class SpotifyExtractor:
             total_tracks=len(tracks),
             tracks=tracks,
         )
+
+    def get_multiple_playlists(self, urls: List[str]) -> List[PlaylistInfo]:
+        """Fetch multiple Spotify playlists sequentially."""
+        playlists = []
+        for u in urls:
+            u = u.strip()
+            if not u:
+                continue
+            try:
+                pl = self.get_playlist(u)
+                playlists.append(pl)
+            except Exception as e:
+                pass
+        return playlists

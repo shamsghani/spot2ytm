@@ -67,10 +67,19 @@
     <!-- Input Section -->
     <section class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
       <div class="max-w-2xl">
-        <h1 class="text-2xl font-bold tracking-tight text-white mb-2">Migrate your Spotify Playlist</h1>
-        <p class="text-slate-400 text-sm mb-6">Enter any public Spotify playlist URL. We'll fetch its tracks, match them on YouTube Music via ISRC & fuzzy scoring, and add them to your YouTube library without API quotas.</p>
+        <div class="flex items-center justify-between mb-2">
+          <h1 class="text-2xl font-bold tracking-tight text-white">Migrate Spotify to YouTube</h1>
+          
+          <!-- Mode Selector Tabs -->
+          <div class="flex items-center space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+            <button id="tabSingle" onclick="switchMode('single')" class="px-3 py-1.5 rounded-lg font-semibold bg-emerald-600 text-white shadow transition-all">Single Playlist</button>
+            <button id="tabBulk" onclick="switchMode('bulk')" class="px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition-all">Bulk / All Playlists</button>
+          </div>
+        </div>
+        <p class="text-slate-400 text-sm mb-6">Extract tracks from Spotify playlists, match them on YouTube Music via ISRC & fuzzy scoring, and add them directly to your YouTube library without API quotas.</p>
         
-        <form onsubmit="handleFetch(event)" class="space-y-4">
+        <!-- Single Mode Form -->
+        <form id="singleForm" onsubmit="handleFetch(event)" class="space-y-4">
           <div class="flex flex-col sm:flex-row gap-3">
             <div class="relative flex-1">
               <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
@@ -78,7 +87,7 @@
                   <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.5 17.3c-.2.3-.6.4-.9.2-2.5-1.5-5.7-1.9-9.4-1-.4.1-.7-.2-.8-.5-.1-.4.2-.7.5-.8 4.1-1 7.7-.5 10.4 1.2.3.2.4.6.2.9zm1.5-3.3c-.3.4-.8.5-1.2.3-2.9-1.8-7.3-2.3-10.7-1.3-.5.1-1-.2-1.1-.6-.1-.5.2-1 .6-1.1 4-1.2 8.8-.6 12.1 1.4.4.3.5.9.3 1.3zm.1-3.4C15.6 8.5 9.7 8.3 6.3 9.3c-.6.2-1.2-.2-1.4-.7-.2-.6.2-1.2.7-1.4 4-1.2 10.6-1 14.7 1.5.5.3.7 1 .4 1.5-.3.5-1 .7-1.6.4z"/>
                 </svg>
               </div>
-              <input id="playlistUrl" type="text" required placeholder="https://open.spotify.com/playlist/..." 
+              <input id="playlistUrl" type="text" placeholder="https://open.spotify.com/playlist/..." 
                 class="w-full pl-11 pr-4 py-3 bg-slate-950 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all" />
             </div>
             <button id="fetchBtn" type="submit" class="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm rounded-xl shadow-lg shadow-emerald-600/20 transition-all flex items-center justify-center space-x-2 shrink-0">
@@ -90,6 +99,29 @@
             </button>
           </div>
         </form>
+
+        <!-- Bulk Mode Form -->
+        <form id="bulkForm" onsubmit="handleBulkFetch(event)" class="hidden space-y-4">
+          <div class="space-y-2">
+            <div class="flex items-center justify-between text-xs text-slate-400">
+              <span>Paste multiple Spotify playlist links (one per line):</span>
+              <span class="text-emerald-400">Batch Processing</span>
+            </div>
+            <textarea id="bulkUrls" rows="4" placeholder="https://open.spotify.com/playlist/...&#10;https://open.spotify.com/playlist/...&#10;https://open.spotify.com/playlist/..."
+              class="w-full p-3.5 bg-slate-950 border border-slate-700 rounded-xl text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all resize-y"></textarea>
+            <p class="text-[11px] text-slate-500">
+              💡 <strong>Profile tip:</strong> In Spotify (desktop or web), right-click each playlist in your library ➔ <em>Share</em> ➔ <em>Copy link to playlist</em>, and paste them here!
+            </p>
+          </div>
+          <button id="bulkFetchBtn" type="submit" class="w-full sm:w-auto px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm rounded-xl shadow-lg shadow-emerald-600/20 transition-all flex items-center justify-center space-x-2">
+            <span id="bulkFetchBtnText">Load & Match All Playlists</span>
+            <svg id="bulkFetchSpinner" class="hidden animate-spin w-4 h-4 text-white" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+            </svg>
+          </button>
+        </form>
+
       </div>
     </section>
 
@@ -285,43 +317,12 @@
       loginBtn.innerHTML = '<span>Opening window...</span>';
       try {
         await fetch('/api/login', { method: 'POST' });
-        // Poll status every 3 seconds
         const poll = setInterval(async () => {
           const res = await fetch('/api/status');
           const data = await res.json();
           if (data.logged_in) {
             clearInterval(poll);
-            function openInBrowserModal() {
-      const modal = document.getElementById('inBrowserModal');
-      const playlistName = document.getElementById('targetPlaylistName').value.trim() || currentPlaylist.name;
-      const validVideoIds = currentMatches.map(m => m.youtube_video_id).filter(Boolean);
-
-      if (validVideoIds.length === 0) {
-        alert("No matched videos to sync!");
-        return;
-      }
-
-      const scriptContent = `(async()=>{try{const apiKey=window.ytcfg?.get('INNERTUBE_API_KEY');const context=window.ytcfg?.get('INNERTUBE_CONTEXT');if(!apiKey||!context){alert('Please run this while on youtube.com or music.youtube.com!');return;}const match=document.cookie.match(/SAPISID=([^;]+)/);if(!match){alert('Please log into YouTube in this tab first!');return;}const sapisid=match[1];const timestamp=Math.floor(Date.now()/1000);const origin=window.location.origin;const encoder=new TextEncoder();const data=encoder.encode(timestamp+' '+sapisid+' '+origin);const hashBuffer=await crypto.subtle.digest('SHA-1',data);const sapisidHash=Array.from(new Uint8Array(hashBuffer)).map(b=>b.toString(16).padStart(2,'0')).join('');const headers={'Content-Type':'application/json','Authorization':'SAPISIDHASH '+timestamp+'_'+sapisidHash,'X-Origin':origin};const resp=await fetch('/youtubei/v1/playlist/create?key='+apiKey,{method:'POST',headers:headers,body:JSON.stringify({context:context,title:${JSON.stringify(playlistName)},videoIds:${JSON.stringify(validVideoIds)}})});const dataRes=await resp.json();if(dataRes.playlistId){window.location.href='/playlist?list='+dataRes.playlistId;}else{alert('Creation response: '+JSON.stringify(dataRes));}}catch(err){alert('Sync error: '+err.message);}})();`;
-
-      const bookmarkletCode = 'javascript:' + encodeURIComponent(scriptContent);
-      document.getElementById('bookmarkletLink').href = bookmarkletCode;
-      document.getElementById('inBrowserCodeBox').value = scriptContent;
-
-      modal.classList.remove('hidden');
-    }
-
-    function closeInBrowserModal() {
-      document.getElementById('inBrowserModal').classList.add('hidden');
-    }
-
-    function copyInBrowserCode() {
-      const box = document.getElementById('inBrowserCodeBox');
-      box.select();
-      navigator.clipboard.writeText(box.value);
-      alert("Code copied to clipboard! Open your YouTube Music tab, press F12, click Console, paste and press Enter.");
-    }
-
-    checkStatus();
+            checkStatus();
           }
         }, 3000);
       } catch (err) {
@@ -329,6 +330,95 @@
         loginBtn.disabled = false;
         loginBtn.innerHTML = '<span>Log in to YouTube</span>';
       }
+    }
+
+    let isBulkMode = false;
+    let bulkPlaylists = [];
+
+    function switchMode(mode) {
+      isBulkMode = mode === 'bulk';
+      document.getElementById('singleForm').classList.toggle('hidden', isBulkMode);
+      document.getElementById('bulkForm').classList.toggle('hidden', !isBulkMode);
+
+      const tabSingle = document.getElementById('tabSingle');
+      const tabBulk = document.getElementById('tabBulk');
+      if (isBulkMode) {
+        tabBulk.className = 'px-3 py-1.5 rounded-lg font-semibold bg-emerald-600 text-white shadow transition-all';
+        tabSingle.className = 'px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition-all';
+      } else {
+        tabSingle.className = 'px-3 py-1.5 rounded-lg font-semibold bg-emerald-600 text-white shadow transition-all';
+        tabBulk.className = 'px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-white transition-all';
+      }
+    }
+
+    async function handleBulkFetch(e) {
+      e.preventDefault();
+      const raw = document.getElementById('bulkUrls').value.trim();
+      if (!raw) return;
+
+      const matches = raw.match(/https?:\/\/open\.spotify\.com\/(?:intl-\w+\/)?playlist\/[a-zA-Z0-9]+/g);
+      const urls = matches ? Array.from(new Set(matches)) : raw.split(/\n+/).map(s => s.trim()).filter(Boolean);
+
+      if (urls.length === 0) {
+        alert("Please enter at least one Spotify playlist link.");
+        return;
+      }
+
+      const btn = document.getElementById('bulkFetchBtn');
+      const text = document.getElementById('bulkFetchBtnText');
+      const spinner = document.getElementById('bulkFetchSpinner');
+
+      btn.disabled = true;
+      text.textContent = `Matching ${urls.length} playlists...`;
+      spinner.classList.remove('hidden');
+
+      try {
+        const res = await fetch('/api/fetch-bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ urls })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        bulkPlaylists = data.items;
+        if (!bulkPlaylists || bulkPlaylists.length === 0) {
+          alert("No playlists could be extracted. Please check the URLs.");
+          return;
+        }
+
+        renderBulkPlaylists();
+      } catch (err) {
+        alert("Bulk match error: " + err.message);
+      } finally {
+        btn.disabled = false;
+        text.textContent = 'Load & Match All Playlists';
+        spinner.classList.add('hidden');
+      }
+    }
+
+    function renderBulkPlaylists() {
+      // Set the first playlist as current for preview, and open section
+      currentPlaylist = bulkPlaylists[0].playlist;
+      currentMatches = bulkPlaylists[0].matches;
+
+      document.getElementById('playlistSection').classList.remove('hidden');
+      document.getElementById('playlistCover').src = currentPlaylist.cover_url || 'https://via.placeholder.com/80';
+      document.getElementById('playlistTitle').textContent = `Bulk Batch: ${bulkPlaylists.length} Playlists`;
+      
+      const totalTracksAll = bulkPlaylists.reduce((acc, p) => acc + p.matches.length, 0);
+      const totalMatchedAll = bulkPlaylists.reduce((acc, p) => acc + p.matches.filter(m => m.youtube_video_id).length, 0);
+
+      document.getElementById('playlistAuthor').textContent = `Total: ${totalTracksAll} tracks across ${bulkPlaylists.length} playlists`;
+      document.getElementById('totalBadge').textContent = `${bulkPlaylists.length} Playlists`;
+      document.getElementById('matchedBadge').textContent = `${totalMatchedAll} Matched`;
+      document.getElementById('missedBadge').textContent = `${totalTracksAll - totalMatchedAll} Skipped`;
+
+      // Hide custom single name input in bulk mode
+      document.getElementById('targetPlaylistName').value = `(All ${bulkPlaylists.length} original playlist names)`;
+      document.getElementById('targetPlaylistName').disabled = true;
+
+      renderTracksTable();
     }
 
     async function handleFetch(e) {
@@ -374,6 +464,7 @@
       document.getElementById('playlistTitle').textContent = currentPlaylist.name;
       document.getElementById('playlistAuthor').textContent = `By ${currentPlaylist.author} • ${currentPlaylist.total_tracks} tracks`;
       document.getElementById('targetPlaylistName').value = currentPlaylist.name;
+      document.getElementById('targetPlaylistName').disabled = false;
 
       const matchedCount = currentMatches.filter(m => m.youtube_video_id).length;
       const missedCount = currentMatches.length - matchedCount;
@@ -382,6 +473,10 @@
       document.getElementById('matchedBadge').textContent = `${matchedCount} Matched`;
       document.getElementById('missedBadge').textContent = `${missedCount} Skipped`;
 
+      renderTracksTable();
+    }
+
+    function renderTracksTable() {
       const tbody = document.getElementById('tracksTableBody');
       tbody.innerHTML = '';
 
@@ -492,15 +587,31 @@
 
     function openInBrowserModal() {
       const modal = document.getElementById('inBrowserModal');
-      const playlistName = document.getElementById('targetPlaylistName').value.trim() || currentPlaylist.name;
-      const validVideoIds = currentMatches.map(m => m.youtube_video_id).filter(Boolean);
 
-      if (validVideoIds.length === 0) {
-        alert("No matched videos to sync!");
-        return;
+      let scriptContent = '';
+      if (isBulkMode && bulkPlaylists.length > 0) {
+        const batchData = bulkPlaylists.map(item => ({
+          title: item.playlist.name,
+          videoIds: item.matches.map(m => m.youtube_video_id).filter(Boolean)
+        })).filter(p => p.videoIds.length > 0);
+
+        if (batchData.length === 0) {
+          alert("No matched videos found across your playlists!");
+          return;
+        }
+
+        scriptContent = `(async()=>{try{const apiKey=window.ytcfg?.get('INNERTUBE_API_KEY');const context=window.ytcfg?.get('INNERTUBE_CONTEXT');if(!apiKey||!context){alert('Please run this while on youtube.com or music.youtube.com!');return;}const match=document.cookie.match(/SAPISID=([^;]+)/);if(!match){alert('Please log into YouTube in this tab first!');return;}const sapisid=match[1];const timestamp=Math.floor(Date.now()/1000);const origin=window.location.origin;const encoder=new TextEncoder();const data=encoder.encode(timestamp+' '+sapisid+' '+origin);const hashBuffer=await crypto.subtle.digest('SHA-1',data);const sapisidHash=Array.from(new Uint8Array(hashBuffer)).map(b=>b.toString(16).padStart(2,'0')).join('');const headers={'Content-Type':'application/json','Authorization':'SAPISIDHASH '+timestamp+'_'+sapisidHash,'X-Origin':origin};const playlists=${JSON.stringify(batchData)};console.log('Starting bulk migration of '+playlists.length+' playlists...');for(let i=0;i<playlists.length;i++){const p=playlists[i];console.log('Creating ('+(i+1)+'/'+playlists.length+'): '+p.title+' with '+p.videoIds.length+' tracks...');await fetch('/youtubei/v1/playlist/create?key='+apiKey,{method:'POST',headers:headers,body:JSON.stringify({context:context,title:p.title,videoIds:p.videoIds})});await new Promise(r=>setTimeout(r,800));}alert('🎉 Bulk Migration Complete! Created '+playlists.length+' playlists on YouTube.');window.location.href='/library/playlists';}catch(err){alert('Sync error: '+err.message);}})();`;
+      } else {
+        const playlistName = document.getElementById('targetPlaylistName').value.trim() || currentPlaylist.name;
+        const validVideoIds = currentMatches.map(m => m.youtube_video_id).filter(Boolean);
+
+        if (validVideoIds.length === 0) {
+          alert("No matched videos to sync!");
+          return;
+        }
+
+        scriptContent = `(async()=>{try{const apiKey=window.ytcfg?.get('INNERTUBE_API_KEY');const context=window.ytcfg?.get('INNERTUBE_CONTEXT');if(!apiKey||!context){alert('Please run this while on youtube.com or music.youtube.com!');return;}const match=document.cookie.match(/SAPISID=([^;]+)/);if(!match){alert('Please log into YouTube in this tab first!');return;}const sapisid=match[1];const timestamp=Math.floor(Date.now()/1000);const origin=window.location.origin;const encoder=new TextEncoder();const data=encoder.encode(timestamp+' '+sapisid+' '+origin);const hashBuffer=await crypto.subtle.digest('SHA-1',data);const sapisidHash=Array.from(new Uint8Array(hashBuffer)).map(b=>b.toString(16).padStart(2,'0')).join('');const headers={'Content-Type':'application/json','Authorization':'SAPISIDHASH '+timestamp+'_'+sapisidHash,'X-Origin':origin};const resp=await fetch('/youtubei/v1/playlist/create?key='+apiKey,{method:'POST',headers:headers,body:JSON.stringify({context:context,title:${JSON.stringify(playlistName)},videoIds:${JSON.stringify(validVideoIds)}})});const dataRes=await resp.json();if(dataRes.playlistId){window.location.href='/playlist?list='+dataRes.playlistId;}else{alert('Creation response: '+JSON.stringify(dataRes));}}catch(err){alert('Sync error: '+err.message);}})();`;
       }
-
-      const scriptContent = `(async()=>{try{const apiKey=window.ytcfg?.get('INNERTUBE_API_KEY');const context=window.ytcfg?.get('INNERTUBE_CONTEXT');if(!apiKey||!context){alert('Please run this while on youtube.com or music.youtube.com!');return;}const match=document.cookie.match(/SAPISID=([^;]+)/);if(!match){alert('Please log into YouTube in this tab first!');return;}const sapisid=match[1];const timestamp=Math.floor(Date.now()/1000);const origin=window.location.origin;const encoder=new TextEncoder();const data=encoder.encode(timestamp+' '+sapisid+' '+origin);const hashBuffer=await crypto.subtle.digest('SHA-1',data);const sapisidHash=Array.from(new Uint8Array(hashBuffer)).map(b=>b.toString(16).padStart(2,'0')).join('');const headers={'Content-Type':'application/json','Authorization':'SAPISIDHASH '+timestamp+'_'+sapisidHash,'X-Origin':origin};const resp=await fetch('/youtubei/v1/playlist/create?key='+apiKey,{method:'POST',headers:headers,body:JSON.stringify({context:context,title:${JSON.stringify(playlistName)},videoIds:${JSON.stringify(validVideoIds)}})});const dataRes=await resp.json();if(dataRes.playlistId){window.location.href='/playlist?list='+dataRes.playlistId;}else{alert('Creation response: '+JSON.stringify(dataRes));}}catch(err){alert('Sync error: '+err.message);}})();`;
 
       const bookmarkletCode = 'javascript:' + encodeURIComponent(scriptContent);
       document.getElementById('bookmarkletLink').href = bookmarkletCode;
