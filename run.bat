@@ -7,7 +7,8 @@ echo   spot2ytm - Spotify to YouTube Music Migrator
 echo ========================================================
 echo.
 
-:: Detect Python
+:: 1. Check if Python is installed
+set PY_CMD=
 where python >nul 2>nul
 if %ERRORLEVEL% equ 0 (
     set PY_CMD=python
@@ -15,48 +16,58 @@ if %ERRORLEVEL% equ 0 (
     where py >nul 2>nul
     if %ERRORLEVEL% equ 0 (
         set PY_CMD=py -3
-    ) else (
-        echo [ERROR] Python was not found in your PATH.
-        echo Please install Python 3.10+ from https://www.python.org/downloads/
-        echo Make sure to check "Add Python to PATH" during installation.
-        echo.
-        pause
-        exit /b 1
     )
 )
 
-:: Virtual environment setup
+if "%PY_CMD%"=="" (
+    echo [NOTICE] Python was not found on your system.
+    echo.
+    echo Opening Python download page in your browser...
+    start https://www.python.org/downloads/
+    echo.
+    echo Please follow these 2 quick steps:
+    echo   1. Run the downloaded installer.
+    echo   2. IMPORTANT: Check the box "Add Python to PATH" at the bottom!
+    echo   3. Once finished, double-click this run.bat again.
+    echo.
+    pause
+    exit /b 1
+)
+
+:: 2. Set up local virtual environment if needed
 if not exist ".venv\Scripts\activate.bat" (
-    echo [SETUP] First-time run: Creating virtual environment (.venv)...
+    echo [1/2] First-time setup: Preparing local environment...
     %PY_CMD% -m venv .venv
     if %ERRORLEVEL% neq 0 (
-        echo [ERROR] Failed to create virtual environment.
+        echo [ERROR] Could not create virtual environment.
+        echo Please ensure Python is properly installed and try again.
         pause
         exit /b 1
     )
-    echo [SETUP] Installing dependencies (this only happens once)...
+    echo [2/2] Installing lightweight dependencies (takes ~10 seconds)...
     call .venv\Scripts\activate.bat
     python -m pip install --upgrade pip --quiet
-    pip install -r requirements.txt
+    pip install -r requirements.txt --quiet
     if %ERRORLEVEL% neq 0 (
-        echo [ERROR] Failed to install dependencies.
+        echo [ERROR] Failed to install dependencies. Check your internet connection.
         pause
         exit /b 1
     )
-    echo [SETUP] Setup complete!
+    echo.
+    echo [OK] Setup completed successfully!
     echo.
 ) else (
     call .venv\Scripts\activate.bat
 )
 
-:: Launch spot2ytm
-echo [STARTING] Launching spot2ytm local server...
-echo 🌐 Your browser will open automatically at http://localhost:5000
+:: 3. Launch application
+echo [STARTING] Launching spot2ytm...
+echo 🌐 Your web browser will open automatically in a moment!
 echo.
 python run.py
 
 if %ERRORLEVEL% neq 0 (
     echo.
-    echo [NOTICE] Application terminated with code %ERRORLEVEL%.
+    echo [NOTICE] Application closed with code %ERRORLEVEL%.
     pause
 )

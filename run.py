@@ -42,7 +42,10 @@ def main():
     threading.Thread(target=open_browser, args=(url,), daemon=True).start()
 
     # Start FastAPI / Uvicorn server
-    uvicorn.run("spot2ytm.app:app", host="127.0.0.1", port=port, log_level="info")
+    try:
+        uvicorn.run("spot2ytm.app:app", host="127.0.0.1", port=port, log_level="info")
+    except KeyboardInterrupt:
+        print("\n\n👋 spot2ytm server stopped. Goodbye!\n")
 
 
 if __name__ == "__main__":
