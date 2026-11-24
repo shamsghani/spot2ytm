@@ -52,37 +52,45 @@ WEB_DIR = Path(__file__).parent / "web"
 
 # In-memory storage for Spotify library import
 imported_spotify_playlists: List[Dict[str, Any]] = []
+global_spotify_token: Optional[str] = None
 
 
 class FetchRequest(BaseModel):
     url: str
+    token: Optional[str] = None
 
 
 class BulkFetchRequest(BaseModel):
     urls: List[str]
+    token: Optional[str] = None
 
 
 class SpotifyImportRequest(BaseModel):
     playlists: List[Dict[str, Any]]
+    token: Optional[str] = None
 
 
 @app.post("/api/spotify-import")
 async def receive_spotify_import(req: SpotifyImportRequest):
-    global imported_spotify_playlists
+    global imported_spotify_playlists, global_spotify_token
     imported_spotify_playlists = req.playlists
+    if req.token:
+        global_spotify_token = req.token
+        logger.info("Saved user Spotify session token (enables private playlist access)")
     logger.info("Received %d imported Spotify playlists from bookmarklet", len(imported_spotify_playlists))
     return {"status": "ok", "count": len(imported_spotify_playlists)}
 
 
 @app.get("/api/spotify-import")
 async def get_spotify_import():
-    return {"playlists": imported_spotify_playlists}
+    return {"playlists": imported_spotify_playlists, "has_token": bool(global_spotify_token)}
 
 
 @app.delete("/api/spotify-import")
 async def clear_spotify_import():
-    global imported_spotify_playlists
+    global imported_spotify_playlists, global_spotify_token
     imported_spotify_playlists = []
+    global_spotify_token = None
     return {"status": "cleared"}
 
 
@@ -108,8 +116,9 @@ async def fetch_and_match_stream(req: FetchRequest):
     """Server-Sent Events endpoint streaming verbose real-time progress for single playlist."""
     async def event_generator():
         try:
+            auth_token = req.token or global_spotify_token
             yield f"data: {json.dumps({'type': 'log', 'level': 'info', 'message': 'Connecting to Spotify to extract playlist metadata...'})}\n\n"
-            playlist = await asyncio.to_thread(extractor.get_playlist, req.url)
+            playlist = await asyncio.to_thread(extractor.get_playlist, req.url, auth_token)
             total = len(playlist.tracks)
             yield f"data: {json.dumps({'type': 'log', 'level': 'info', 'message': f'Extracted: \"{playlist.name}\" by {playlist.author} ({total} tracks)'})}\n\n"
             yield f"data: {json.dumps({'type': 'playlist_info', 'playlist': playlist.to_dict()})}\n\n"
@@ -163,10 +172,11 @@ async def fetch_and_match_bulk_stream(req: BulkFetchRequest):
             total_tracks_all = 0
             total_matched_all = 0
 
+            auth_token = req.token or global_spotify_token
             for p_idx, url in enumerate(urls):
                 yield f"data: {json.dumps({'type': 'log', 'level': 'info', 'message': f'📂 [{p_idx+1}/{total_playlists}] Fetching metadata for {url}'})}\n\n"
                 try:
-                    playlist = await asyncio.to_thread(extractor.get_playlist, url)
+                    playlist = await asyncio.to_thread(extractor.get_playlist, url, auth_token)
                 except Exception as pe:
                     yield f"data: {json.dumps({'type': 'log', 'level': 'error', 'message': f'Failed to extract playlist {url}: {pe}'})}\n\n"
                     continue

@@ -441,6 +441,7 @@
     let spotifyLibraryPlaylists = [];
     let selectedSpotifyIds = new Set();
     let spotifyPollTimer = null;
+    let activeSpotifyToken = '';
 
     // Format seconds to mm:ss
     function fmtDur(sec) {
@@ -559,7 +560,7 @@
         const response = await fetch('/api/fetch/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url })
+          body: JSON.stringify({ url, token: activeSpotifyToken })
         });
 
         if (!response.ok) {
@@ -642,7 +643,7 @@
         const response = await fetch('/api/fetch-bulk/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ urls })
+          body: JSON.stringify({ urls, token: activeSpotifyToken })
         });
 
         if (!response.ok) {
@@ -773,7 +774,7 @@
 
     function generateSpotifyBookmarkletCode() {
       const origin = window.location.origin;
-      return `(async()=>{try{const origin=${JSON.stringify(origin)};if(!window.location.hostname.includes('spotify.com')){alert('Please open https://open.spotify.com in this tab before clicking this bookmarklet!');return;}const b=document.createElement('div');b.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#1db954;color:#000;font-family:sans-serif;font-weight:bold;padding:14px 24px;border-radius:12px;z-index:999999;box-shadow:0 10px 30px rgba(0,0,0,0.5);font-size:14px;';b.textContent='🎵 spot2ytm: Reading your Spotify library...';document.body.appendChild(b);let token=null;try{const tr=await fetch('/get_access_token?reason=transport&productType=web_player');if(tr.ok){const td=await tr.json();if(td&&td.accessToken&&!td.isAnonymous){token=td.accessToken;}}}catch(e){}if(!token){for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);const v=localStorage.getItem(k);if(v&&v.startsWith('BQ')&&v.length>50){token=v;break;}}}if(!token){for(let i=0;i<sessionStorage.length;i++){const k=sessionStorage.key(i);const v=sessionStorage.getItem(k);if(v&&v.startsWith('BQ')&&v.length>50){token=v;break;}}}let playlists=[];if(token){let nextUrl='https://api.spotify.com/v1/me/playlists?limit=50';while(nextUrl){const r=await fetch(nextUrl,{headers:{'Authorization':'Bearer '+token}});if(!r.ok)break;const d=await r.json();if(d.items&&d.items.length>0){for(const p of d.items){if(!p)continue;playlists.push({id:p.id,name:p.name||'Untitled',author:p.owner?.display_name||'Spotify User',total_tracks:p.tracks?.total||0,cover_url:p.images?.[0]?.url||'',url:p.external_urls?.spotify||('https://open.spotify.com/playlist/'+p.id)});}}nextUrl=d.next;}}if(playlists.length===0){const links=document.querySelectorAll('a[href*="/playlist/"]');const seen=new Set();links.forEach(a=>{const m=a.href.match(/playlist\\/([a-zA-Z0-9]{22})/);if(m&&!seen.has(m[1])){seen.add(m[1]);const name=a.innerText.trim()||('Playlist '+m[1].slice(0,6));const img=a.querySelector('img')?.src||'';playlists.push({id:m[1],name:name,author:'Your Library',total_tracks:0,cover_url:img,url:'https://open.spotify.com/playlist/'+m[1]});}});}b.remove();if(playlists.length===0){alert('Could not detect any playlists. Please ensure you are logged in at https://open.spotify.com and your Library is visible!');return;}try{await fetch(origin+'/api/spotify-import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({playlists:playlists})});}catch(e){}const compact=playlists.map(p=>({id:p.id,name:p.name,author:p.author,total_tracks:p.total_tracks,cover_url:p.cover_url,url:p.url}));const hashData=encodeURIComponent(JSON.stringify(compact));const retUrl=origin+'/#spotify_imported='+hashData;alert('🎉 Found '+playlists.length+' playlists in your Spotify account!\\n\\nClick OK to return to spot2ytm and choose which ones to migrate.');window.location.href=retUrl;}catch(err){alert('Extraction failed: '+err.message);}})();`;
+      return `(async()=>{try{const origin=${JSON.stringify(origin)};if(!window.location.hostname.includes('spotify.com')){alert('Please open https://open.spotify.com in this tab before clicking this bookmarklet!');return;}const b=document.createElement('div');b.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#1db954;color:#000;font-family:sans-serif;font-weight:bold;padding:14px 24px;border-radius:12px;z-index:999999;box-shadow:0 10px 30px rgba(0,0,0,0.5);font-size:14px;';b.textContent='🎵 spot2ytm: Reading your Spotify library...';document.body.appendChild(b);let token=null;try{const tr=await fetch('/get_access_token?reason=transport&productType=web_player');if(tr.ok){const td=await tr.json();if(td&&td.accessToken&&!td.isAnonymous){token=td.accessToken;}}}catch(e){}if(!token){for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);const v=localStorage.getItem(k);if(v&&v.startsWith('BQ')&&v.length>50){token=v;break;}}}if(!token){for(let i=0;i<sessionStorage.length;i++){const k=sessionStorage.key(i);const v=sessionStorage.getItem(k);if(v&&v.startsWith('BQ')&&v.length>50){token=v;break;}}}let playlists=[];if(token){let nextUrl='https://api.spotify.com/v1/me/playlists?limit=50';while(nextUrl){const r=await fetch(nextUrl,{headers:{'Authorization':'Bearer '+token}});if(!r.ok)break;const d=await r.json();if(d.items&&d.items.length>0){for(const p of d.items){if(!p)continue;playlists.push({id:p.id,name:p.name||'Untitled',author:p.owner?.display_name||'Spotify User',total_tracks:p.tracks?.total||0,cover_url:p.images?.[0]?.url||'',url:p.external_urls?.spotify||('https://open.spotify.com/playlist/'+p.id)});}}nextUrl=d.next;}}if(playlists.length===0){const links=document.querySelectorAll('a[href*="/playlist/"]');const seen=new Set();links.forEach(a=>{const m=a.href.match(/playlist\\/([a-zA-Z0-9]{22})/);if(m&&!seen.has(m[1])){seen.add(m[1]);const name=a.innerText.trim()||('Playlist '+m[1].slice(0,6));const img=a.querySelector('img')?.src||'';playlists.push({id:m[1],name:name,author:'Your Library',total_tracks:0,cover_url:img,url:'https://open.spotify.com/playlist/'+m[1]});}});}b.remove();if(playlists.length===0){alert('Could not detect any playlists. Please ensure you are logged in at https://open.spotify.com and your Library is visible!');return;}try{await fetch(origin+'/api/spotify-import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:token,playlists:playlists})});}catch(e){}const compact=playlists.map(p=>({id:p.id,name:p.name,author:p.author,total_tracks:p.total_tracks,cover_url:p.cover_url,url:p.url}));const hashData=encodeURIComponent(JSON.stringify(compact));const retUrl=origin+'/#spotify_imported='+hashData+'&spotify_token='+encodeURIComponent(token||'');alert('🎉 Found '+playlists.length+' playlists in your Spotify account!\\n\\nClick OK to return to spot2ytm and choose which ones to migrate.');window.location.href=retUrl;}catch(err){alert('Extraction failed: '+err.message);}})();`;
     }
 
     function openSpotifyImportModal() {
@@ -829,13 +830,22 @@
     }
 
     function checkUrlImport() {
-      if (window.location.hash.startsWith('#spotify_imported=')) {
+      if (window.location.hash.includes('spotify_imported=')) {
         try {
-          const raw = decodeURIComponent(window.location.hash.slice(18));
-          const playlists = JSON.parse(raw);
-          if (Array.isArray(playlists) && playlists.length > 0) {
-            history.replaceState(null, '', window.location.pathname);
-            renderSpotifyChecklist(playlists);
+          const hashStr = window.location.hash.replace(/^#/, '');
+          const params = new URLSearchParams(hashStr);
+          const rawPlaylists = params.get('spotify_imported');
+          const token = params.get('spotify_token');
+          if (token) {
+            activeSpotifyToken = token;
+          }
+
+          if (rawPlaylists) {
+            const playlists = JSON.parse(decodeURIComponent(rawPlaylists));
+            if (Array.isArray(playlists) && playlists.length > 0) {
+              history.replaceState(null, '', window.location.pathname);
+              renderSpotifyChecklist(playlists);
+            }
           }
         } catch (e) {
           console.error("Failed to parse #spotify_imported hash", e);

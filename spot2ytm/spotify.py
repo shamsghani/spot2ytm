@@ -3,10 +3,14 @@ Spotify playlist metadata and track extractor.
 Uses anonymous web tokens (SpotipyFree) so no Spotify API keys are required.
 """
 
+import logging
 import re
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional, Tuple
+import requests
 from SpotipyFree import Spotify as FreeSpotify
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -95,11 +99,94 @@ def extract_user_id(url: str) -> Optional[str]:
 
 
 class SpotifyExtractor:
-    def __init__(self):
+    def __init__(self, user_token: Optional[str] = None):
+        self.user_token = user_token
         self.client = FreeSpotify()
 
-    def get_playlist(self, url_or_id: str) -> PlaylistInfo:
+    def _get_playlist_authenticated(self, playlist_id: str, token: str) -> PlaylistInfo:
+        """Fetch playlist (including private playlists) using an authorized Spotify user token."""
+        headers = {"Authorization": f"Bearer {token}"}
+        resp = requests.get(f"https://api.spotify.com/v1/playlists/{playlist_id}", headers=headers, timeout=15)
+        if resp.status_code != 200:
+            raise ValueError(f"Spotify API returned status {resp.status_code}: {resp.text}")
+
+        data = resp.json()
+        name = data.get("name") or "Untitled Playlist"
+        description = data.get("description") or ""
+        owner = data.get("owner", {}).get("display_name") or "Spotify User"
+        images = data.get("images") or []
+        cover_url = images[0].get("url") if images else None
+
+        items_list = []
+        tracks_obj = data.get("tracks") or {}
+        if "items" in tracks_obj:
+            items_list.extend(tracks_obj.get("items") or [])
+            next_url = tracks_obj.get("next")
+            while next_url:
+                page_resp = requests.get(next_url, headers=headers, timeout=15)
+                if page_resp.status_code != 200:
+                    break
+                page_data = page_resp.json()
+                items_list.extend(page_data.get("items") or [])
+                next_url = page_data.get("next")
+
+        tracks: List[Track] = []
+        for idx, item in enumerate(items_list):
+            if not isinstance(item, dict):
+                continue
+            track_data = item.get("track") or item.get("item")
+            if not track_data or track_data.get("is_local") or track_data.get("type") != "track":
+                continue
+
+            track_id = track_data.get("id") or f"track_{idx}"
+            duration_ms = track_data.get("duration_ms", 0)
+            duration_sec = int(duration_ms / 1000)
+            if duration_sec == 0:
+                continue
+
+            artists = [a.get("name") for a in track_data.get("artists", []) if a.get("name")]
+            album_meta = track_data.get("album", {})
+            album_name = album_meta.get("name") or ""
+            album_images = album_meta.get("images") or []
+            track_cover = album_images[0].get("url") if album_images else cover_url
+
+            external_ids = track_data.get("external_ids", {})
+            isrc = external_ids.get("isrc")
+            spotify_url = track_data.get("external_urls", {}).get("spotify")
+
+            tracks.append(
+                Track(
+                    id=track_id,
+                    name=track_data.get("name", "Unknown Title"),
+                    artists=artists if artists else ["Unknown Artist"],
+                    album=album_name,
+                    duration_seconds=duration_sec,
+                    isrc=isrc,
+                    cover_url=track_cover,
+                    spotify_url=spotify_url,
+                    track_number=track_data.get("track_number", idx + 1),
+                )
+            )
+
+        return PlaylistInfo(
+            id=playlist_id,
+            name=name,
+            description=description,
+            author=owner,
+            cover_url=cover_url,
+            total_tracks=len(tracks),
+            tracks=tracks,
+        )
+
+    def get_playlist(self, url_or_id: str, token: Optional[str] = None) -> PlaylistInfo:
         playlist_id = extract_playlist_id(url_or_id)
+        auth_token = token or self.user_token
+        if auth_token:
+            try:
+                return self._get_playlist_authenticated(playlist_id, auth_token)
+            except Exception as e:
+                logger.warning("Authenticated playlist fetch failed for %s, falling back to anonymous: %s", playlist_id, e)
+
         raw_playlist = self.client.playlist(playlist_id)
         if not raw_playlist:
             raise ValueError(f"Could not retrieve playlist metadata for ID {playlist_id}")
