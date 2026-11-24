@@ -9,6 +9,10 @@
 
 `spot2ytm` is a lightweight, portable local web application that extracts your Spotify playlists, matches songs against YouTube Music using spotDL-style precision matching, and syncs them directly into your YouTube library with 1 click in your active browser session.
 
+<p align="center">
+  <img src="docs/screenshots/1_dashboard.png" alt="spot2ytm Web Dashboard" width="850" style="border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
+</p>
+
 ---
 
 ## ⚡ Why spot2ytm vs Other Services?
@@ -76,16 +80,31 @@ Your browser will automatically open to `http://localhost:5000`.
 2. Click **"Auto-Detect My Playlists"**.
 3. Drag the **"Extract Spotify Playlists"** bookmarklet to your bookmarks bar *(Press `Ctrl+Shift+B` or `Cmd+Shift+B` if your bookmarks bar is hidden)*.
 4. Open [open.spotify.com](https://open.spotify.com) (make sure you are logged in) and click the bookmarklet!
+
+<p align="center">
+  <img src="docs/screenshots/3_spotify_modal.png" alt="Spotify 1-Click Extraction Modal" width="440" />
+  &nbsp;
+  <img src="docs/screenshots/4_spotify_checklist.png" alt="Spotify Library Checklist" width="440" />
+</p>
+
 5. When you return to spot2ytm, your entire Spotify library will appear in an interactive checklist:
    - Check/uncheck playlists, use the instant search filter, or click "Select All".
    - Click **"Migrate Selected Playlists"** to start real-time batch matching!
 6. Once matching finishes, click **"1-Click Sync to YouTube"** to add all playlists directly to your YouTube Music account!
+
+<p align="center">
+  <img src="docs/screenshots/5_matching_console.png" alt="Live Matching Console" width="850" />
+</p>
 
 ### Option 2: Manual Playlist URL(s)
 1. Paste a single Spotify playlist link or multiple links (one per line).
 2. Click **"Load & Match"**.
 3. Watch the **Live Matching Progress** terminal stream every track lookup, ISRC match, and confidence score in real time.
 4. Review matches and click **"1-Click Sync to YouTube"** to instantly add them to your YouTube Music library!
+
+<p align="center">
+  <img src="docs/screenshots/6_youtube_sync_modal.png" alt="In-Browser YouTube Sync Modal" width="550" />
+</p>
 
 ---
 
