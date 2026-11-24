@@ -1,5 +1,6 @@
 fastapi>=0.100.0
 uvicorn>=0.22.0
+playwright>=1.40.0
 ytmusicapi>=1.12.0
 rapidfuzz>=3.0.0
 SpotipyFree>=1.9.0

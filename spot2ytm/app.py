@@ -10,7 +10,9 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 
 from spot2ytm.spotify import SpotifyExtractor
@@ -22,11 +24,34 @@ logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="spot2ytm")
 
+# Enable CORS for bookmarklet requests from open.spotify.com
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class PrivateNetworkAccessMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if request.headers.get("access-control-request-private-network"):
+            response.headers["Access-Control-Allow-Private-Network"] = "true"
+        return response
+
+
+app.add_middleware(PrivateNetworkAccessMiddleware)
+
 extractor = SpotifyExtractor()
 cache = MatchCache()
 matcher = MusicMatcher(cache=cache)
 
 WEB_DIR = Path(__file__).parent / "web"
+
+# In-memory storage for Spotify library import
+imported_spotify_playlists: List[Dict[str, Any]] = []
 
 
 class FetchRequest(BaseModel):
@@ -35,6 +60,30 @@ class FetchRequest(BaseModel):
 
 class BulkFetchRequest(BaseModel):
     urls: List[str]
+
+
+class SpotifyImportRequest(BaseModel):
+    playlists: List[Dict[str, Any]]
+
+
+@app.post("/api/spotify-import")
+async def receive_spotify_import(req: SpotifyImportRequest):
+    global imported_spotify_playlists
+    imported_spotify_playlists = req.playlists
+    logger.info("Received %d imported Spotify playlists from bookmarklet", len(imported_spotify_playlists))
+    return {"status": "ok", "count": len(imported_spotify_playlists)}
+
+
+@app.get("/api/spotify-import")
+async def get_spotify_import():
+    return {"playlists": imported_spotify_playlists}
+
+
+@app.delete("/api/spotify-import")
+async def clear_spotify_import():
+    global imported_spotify_playlists
+    imported_spotify_playlists = []
+    return {"status": "cleared"}
 
 
 @app.get("/", response_class=HTMLResponse)

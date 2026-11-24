@@ -14,7 +14,11 @@
   - **ISRC First**: Queries YouTube Music by International Standard Recording Code for 100% verified track matches.
   - **Fuzzy + Duration Scoring**: Uses RapidFuzz token matching, strict duration tolerance (±4s), and negative keyword filtering (filters out fan covers, slowed/reverb, karaoke, or acoustic versions).
 - **📋 Live Verbose Progress Console**: Real-time Server-Sent Events stream showing exact progress per track, ISRC detection, candidate scoring, and matching status directly in an embedded terminal log.
-- **📚 Single & Bulk Playlist Support**: Migrate an individual playlist or batch-process multiple playlists at once.
+- **📚 Single & Bulk Playlist Support**: Migrate an individual playlist, paste batch links, or auto-import your entire Spotify library at once.
+- **🪄 1-Click Spotify Library Auto-Detection**:
+  - Drag the **"Extract Spotify Playlists"** bookmarklet to your browser.
+  - Click it while logged into `open.spotify.com`.
+  - It automatically extracts all your saved and created playlists and loads an interactive checklist on spot2ytm so you can pick and choose what to migrate!
 - **🚀 100% In-Browser 1-Click Sync**:
   - **Option A (Drag Bookmarklet)**: Drag the bookmarklet to your bookmarks bar. Open YouTube Music and click it. No Google logins or secondary browser profiles needed!
   - **Option B (Included Chrome Extension)**: Load the included `extension/` folder in `chrome://extensions` for a permanent toolbar sync button.
@@ -52,18 +56,20 @@ Your browser will automatically open to `http://localhost:5000`.
 
 ## 📖 How to Use
 
-1. **Paste Spotify Playlist(s)**:
-   - For a single playlist: Paste the link into the **Single Playlist** tab.
-   - For multiple playlists: Switch to the **Bulk / All Playlists** tab and paste links (one per line).
-2. **Watch Live Matching**:
-   - Click **"Load & Match"**.
-   - Watch the **Live Matching Progress** terminal stream every track lookup, ISRC match, and confidence score in real time.
-3. **Review Matches**:
-   - Check the preview table with matched YouTube Music audio titles, durations, and match tags.
-4. **1-Click Sync to YouTube**:
-   - Click **"1-Click Sync to YouTube"**.
-   - Choose your preferred sync method (drag bookmarklet, extension, or console snippet).
-   - Watch all tracks get added to your YouTube / YouTube Music library instantly!
+### Option 1: Auto-Import All Playlists from Your Spotify Account
+1. On the web dashboard, click the **"Bulk / All Playlists"** tab.
+2. Click **"Auto-Detect My Playlists"**.
+3. Drag the **"Extract Spotify Playlists"** bookmarklet to your bookmarks bar.
+4. Open [open.spotify.com](https://open.spotify.com) (make sure you are logged in) and click the bookmarklet!
+5. When you return to spot2ytm, your entire Spotify library will be displayed in an interactive checklist:
+   - Check/uncheck playlists, use search filter, or click "Select All".
+   - Click **"Migrate Selected Playlists"** to start real-time batch matching!
+
+### Option 2: Manual Playlist URL(s)
+1. Paste a single Spotify playlist link or multiple links (one per line).
+2. Click **"Load & Match"**.
+3. Watch the **Live Matching Progress** terminal stream every track lookup, ISRC match, and confidence score in real time.
+4. Review matches and click **"1-Click Sync to YouTube"** to instantly add them to your YouTube Music library!
 
 ---
 
